@@ -6,7 +6,7 @@ using namespace std;
 SDL_Window* window = NULL;
 SDL_Renderer* renderer = NULL;
 bool game_is_running = false;
-int last_frame_time = 0;
+float last_frame_time = 0;
 bool isGoalScored;
 int consecutive_shots;
 
@@ -37,18 +37,14 @@ const int FPS = 30;
 const int FRAME_TARGET_TIME = 1000 / FPS;
 const int HORIZONTAL_SPEED = WINDOW_WIDTH / 4.4;
 const int VERTICAL_SPEED = WINDOW_HEIGHT / 5;
+const int PADDLE_SPEED = HORIZONTAL_SPEED * 2;
 
 const int BALL_SIZE = WINDOW_WIDTH / 60;
 const int PADDLE_WIDTH = WINDOW_WIDTH / 80;
 const int PADDLE_HEIGHT = WINDOW_WIDTH / 10;
-const int PADDLE_STEP_SIZE = WINDOW_WIDTH / 40;
-const int GROUND = WINDOW_HEIGHT;
-const int ROOF = 0;
 const int MIDDLE_LINE_SEGMENT_HEIGHT = WINDOW_WIDTH / 40;
 const int MIDDLE_LINE_SEGMENT_WIDTH = MIDDLE_LINE_SEGMENT_HEIGHT / 5;
 const int MIDDLE_LINE_SEGMENT_SPACING = MIDDLE_LINE_SEGMENT_WIDTH;
-const int LEFT_GOAL = -100;
-const int RIGHT_GOAL = WINDOW_WIDTH + 100;
 const float LEFT_SCORE_X = WINDOW_WIDTH / 3;
 const float RIGHT_SCORE_X = WINDOW_WIDTH / 1.65;
 const int SCORE_Y = WINDOW_HEIGHT / 12;
@@ -84,97 +80,80 @@ bool initialize_window() {
     return true;
 }
 
-void process_input() {
-    SDL_Event event;
-    SDL_PollEvent(&event);
+void process_input(float delta_time) {
 
-    switch (event.type) {
-        case SDL_KEYDOWN:
-            switch (event.key.keysym.sym) {
-                case SDLK_ESCAPE:
-                    game_is_running = false;
-                break;
-                case SDLK_UP:
-                    paddle_right.y -= PADDLE_STEP_SIZE;
-                    paddle_right.y_direction = -1;
-                break;
-                case SDLK_DOWN:
-                    paddle_right.y += PADDLE_STEP_SIZE;
-                    paddle_right.y_direction = 1;
-                break;
-                case SDLK_LSHIFT: // non gestisce auto-repeat (tasto premuto)
-                case SDLK_a:
-                    paddle_left.y -= PADDLE_STEP_SIZE;
-                    paddle_left.y_direction = -1;
-                break;
-                case SDLK_LCTRL: // non gestisce auto-repeat (tasto premuto)
-                case SDLK_z:
-                    paddle_left.y += PADDLE_STEP_SIZE;
-                    paddle_left.y_direction = 1;
-                break;
-            }
-            break;
+    SDL_PumpEvents();
+    const Uint8 *keyboardState = SDL_GetKeyboardState(NULL);
+
+    if (keyboardState[SDL_SCANCODE_ESCAPE]) {
+        game_is_running = false;
+        return;
+    }
+    if (keyboardState[SDL_SCANCODE_DOWN]) {
+        if (paddle_right.y + PADDLE_HEIGHT / 2 >= WINDOW_HEIGHT) {
+            paddle_right.y = WINDOW_HEIGHT - PADDLE_HEIGHT / 2;
+            return;
+        }
+        paddle_right.y += PADDLE_SPEED * delta_time;
+        paddle_right.y_direction = 1;
+    }
+    if (keyboardState[SDL_SCANCODE_UP]) {
+        if (paddle_right.y - PADDLE_HEIGHT / 2 <= 0) {
+            paddle_right.y = PADDLE_HEIGHT / 2;
+            return;
+        }
+        paddle_right.y -= PADDLE_SPEED * delta_time;
+        paddle_right.y_direction = -1;
+    }
+    if (keyboardState[SDL_SCANCODE_A]) {
+        if (paddle_left.y - PADDLE_HEIGHT / 2 <= 0) {
+            paddle_left.y = PADDLE_HEIGHT / 2;
+            return;
+        }
+        paddle_left.y -= PADDLE_SPEED * delta_time;
+        paddle_left.y_direction = -1;
+    }
+    if (keyboardState[SDL_SCANCODE_Z]) {
+        if (paddle_left.y + PADDLE_HEIGHT / 2 >= WINDOW_HEIGHT) {
+            paddle_left.y = WINDOW_HEIGHT - PADDLE_HEIGHT / 2;
+            return;
+        }
+        paddle_left.y += PADDLE_SPEED * delta_time;
+        paddle_left.y_direction = 1;
     }
 }
 
-bool collision(Ball ball, Paddle paddle, float delta_x, float delta_y) {
+bool collision(Ball ball, Paddle paddle, float delta_time) {
 
-    return  ((ball.x + delta_x > paddle.x
-                &&
-             ball.x < paddle.x)
-                ||
-             (ball.x - delta_x < paddle.x
-                &&
-             ball.x > paddle.x)
+    if (delta_time == 0)
+        return false;
 
-                )
-            && ball.y >= paddle.y
-            && ball.y <= paddle.y + paddle.height;
-}
-
-bool collision(Ball ball, int surface, int surface_degree, float delta_x, float delta_y) {
-
-    if (surface_degree == 0) {
-        bool horizontal_surface_collision =
-                (ball.y - delta_y <= surface && ball.y >= surface)
-                ||
-                (ball.y - delta_y >= surface && ball.y <= surface);
-        return horizontal_surface_collision;
-    }
-    if (surface_degree == 90) {
-        bool vertical_surface_collision =
-                (ball.x - delta_x <= surface && ball.x >= surface)
-                ||
-                (ball.x - delta_x >= surface && ball.x <= surface);
-        return vertical_surface_collision;
-    }
+    if ((abs(ball.x - paddle.x) <= paddle.width / 2)
+        &&
+        (abs(ball.y - paddle.y) <= paddle.height / 2))
+        return true;
 
     return false;
-
 }
 
-void kick_off(int goalSide) {
-    if (goalSide == LEFT_GOAL)
+void kick_off() {
+    if (ball.x <= 0)
     {
-        ball.x = -BALL_SIZE;
+        ball.x = paddle_left.x + paddle_left.width + ball.width;
         ball.y = BALL_SIZE;
         ball.x_direction = 1;
         ball.y_direction = 1;
     }
     else
     {
-        ball.x = WINDOW_WIDTH;
+        ball.x = paddle_right.x - paddle_right.width - ball.width;
         ball.y = BALL_SIZE;
         ball.x_direction = -1;
         ball.y_direction = 1;
     }
 }
 
-void update() {
-
-    float delta_time = (SDL_GetTicks() - last_frame_time) / 1000.0f;
-
-    last_frame_time = SDL_GetTicks();
+void update(float delta_time) {
 
     float delta_x = ball.x_speed * delta_time;
     float delta_y = ball.y_speed * delta_time;
@@ -182,48 +161,45 @@ void update() {
     ball.x += delta_x * ball.x_direction;
     ball.y += delta_y * ball.y_direction;
 
-    if (collision(ball, paddle_right, delta_x, delta_y))
+    if (collision(ball, paddle_right, delta_time))
     {
         ball.x_direction = -1;
         if (ball.y_direction == paddle_right.y_direction)
             ball.y_direction = -ball.y_direction;
         consecutive_shots++;
-        cout << consecutive_shots << endl;
     }
-    else if (collision(ball, paddle_left, delta_x, delta_y))
+    else if (collision(ball, paddle_left, delta_time))
     {
         ball.x_direction = 1;
         if (ball.y_direction == paddle_left.y_direction)
             ball.y_direction = -ball.y_direction;
         consecutive_shots++;
-        cout << consecutive_shots << endl;
     }
-    else if (collision(ball, GROUND, 0, delta_x, delta_y))
+    else if (ball.y >= WINDOW_HEIGHT)
     {
         ball.y_direction = -1;
     }
-    else if (collision(ball, ROOF, 0, delta_x, delta_y))
+    else if (ball.y <= 0)
     {
         ball.y_direction = +1;
     }
-    else if (collision(ball, LEFT_GOAL, 90, delta_x, delta_y))
+    else if (ball.x <= 0)
     {
         rightScore++;
-        kick_off(LEFT_GOAL);
+        kick_off();
         isGoalScored = true;
         consecutive_shots = 0;
-        cout << "GOAL!" << endl;
-
     }
-    else if (collision(ball, RIGHT_GOAL, 90, delta_x, delta_y))
+    else if (ball.x >= WINDOW_WIDTH)
     {
         leftScore++;
-        kick_off(RIGHT_GOAL);
+        kick_off();
         isGoalScored = true;
         consecutive_shots = 0;
-        cout << "GOAL!" << endl;
     }
 
+    // grow speed and shrink paddle if players manage to hit the ball
+    // ten times in a row.
     if ((consecutive_shots > 0) && (consecutive_shots % 10 == 0)) {
         ball.x_speed += ball.x_speed * 0.2;
         ball.x_speed += ball.y_speed * 0.2;
@@ -231,7 +207,6 @@ void update() {
         paddle_right.height -= paddle_right.height * 0.1;
         consecutive_shots = 0;
     }
-
 }
 
 void render_middle_line(SDL_Renderer* renderer) {
@@ -374,24 +349,24 @@ void render() {
     SDL_RenderClear(renderer);
 
     SDL_Rect ball_rect = {
-        (int)ball.x,
-        (int)ball.y,
-        (int)ball.width,
-        (int)ball.height
+        (int) (ball.x - ball.width / 2),
+        (int) (ball.y - ball.height / 2),
+        (int) ball.width,
+        (int) ball.height
         };
 
     SDL_Rect paddle1_rect = {
-        (int)paddle_left.x,
-        (int)paddle_left.y,
-        (int)paddle_left.width,
-        (int)paddle_left.height
+        (int) (paddle_left.x - paddle_left.width / 2),
+        (int) (paddle_left.y - paddle_left.height / 2),
+        (int) paddle_left.width,
+        (int) paddle_left.height
         };
 
     SDL_Rect paddle2_rect = {
-        (int)paddle_right.x,
-        (int)paddle_right.y,
-        (int)paddle_right.width,
-        (int)paddle_right.height
+        (int) (paddle_right.x - paddle_right.width / 2),
+        (int) (paddle_right.y - paddle_right.height / 2),
+        (int) paddle_right.width,
+        (int) paddle_right.height
         };
 
     SDL_SetRenderDrawColor(renderer, 255, 255, 255, 255);
@@ -422,8 +397,10 @@ void setup() {
     ball.height = BALL_SIZE;
     ball.x_speed = HORIZONTAL_SPEED;
     ball.y_speed = VERTICAL_SPEED;
+    ball.x = 0;
+    ball.y = 0;
 
-    kick_off(LEFT_GOAL);
+    kick_off();
     isGoalScored = false;
     consecutive_shots = 0;
 }
@@ -442,8 +419,12 @@ int main()
     setup();
 
     while (game_is_running) {
-        process_input();
-        update();
+
+        float delta_time = (SDL_GetTicks() - last_frame_time) / 1000.0f;
+        last_frame_time = SDL_GetTicks();
+
+        process_input(delta_time);
+        update(delta_time);
         render();
 
         if (isGoalScored) {
